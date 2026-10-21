@@ -1,0 +1,145 @@
+{
+    "trace": {
+        "id": "b06571a6-17ec-44e0-badd-7b28eeece448",
+        "entityId": "user_REDACTED",
+        "creatorUserId": null,
+        "organizationId": null,
+        "name": "Test Trace - OpenRouter Observability",
+        "timestamp": "2026-10-21T12:46:23.639Z",
+        "userId": "user_REDACTED",
+        "sessionId": null,
+        "input": {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "What is the capital of France?"
+                }
+            ]
+        },
+        "output": {
+            "id": "chatcmpl-test123",
+            "object": "chat.completion",
+            "created": 1792586783,
+            "model": "openai/gpt-4-turbo",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "The capital of France is Paris."
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 50,
+                "completion_tokens": 100,
+                "total_tokens": 150,
+                "prompt_tokens_details": {
+                    "cached_tokens": 20
+                },
+                "completion_tokens_details": {
+                    "reasoning_tokens": 10
+                }
+            }
+        },
+        "metadata": {
+            "environment": "test",
+            "source": "observability-test-button",
+            "testId": "b06571a6-17ec-44e0-badd-7b28eeece448"
+        },
+        "tags": [
+            "test",
+            "observability",
+            "gpt-4-turbo"
+        ],
+        "source": "openrouter",
+        "apiKeyName": "Test API Key",
+        "observations": [
+            {
+                "id": "4e4990a5-511e-418f-aa28-6043493dc34a",
+                "traceId": "b06571a6-17ec-44e0-badd-7b28eeece448",
+                "parentObservationId": null,
+                "entityId": "user_REDACTED",
+                "creatorUserId": null,
+                "organizationId": null,
+                "type": "GENERATION",
+                "name": "Test Generation",
+                "startTime": "2026-10-21T12:46:23.639Z",
+                "endTime": "2026-10-21T12:46:25.139Z",
+                "input": {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "What is the capital of France?"
+                        }
+                    ]
+                },
+                "output": {
+                    "id": "chatcmpl-test123",
+                    "object": "chat.completion",
+                    "created": 1792586783,
+                    "model": "openai/gpt-4-turbo",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {
+                                "role": "assistant",
+                                "content": "The capital of France is Paris."
+                            },
+                            "finish_reason": "stop"
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 50,
+                        "completion_tokens": 100,
+                        "total_tokens": 150,
+                        "prompt_tokens_details": {
+                            "cached_tokens": 20
+                        },
+                        "completion_tokens_details": {
+                            "reasoning_tokens": 10
+                        }
+                    }
+                },
+                "model": "openai/gpt-4-turbo",
+                "modelParameters": {
+                    "temperature": 0.7,
+                    "max_tokens": 150,
+                    "top_p": 1,
+                    "frequency_penalty": 0,
+                    "presence_penalty": 0
+                },
+                "promptTokens": 50,
+                "completionTokens": 100,
+                "totalTokens": 150,
+                "inputCost": 0.005,
+                "outputCost": 0.015,
+                "totalCost": 0.02,
+                "level": "DEFAULT",
+                "statusMessage": null,
+                "statusCode": null,
+                "metadata": {
+                    "test": "true"
+                },
+                "version": "1.0.0",
+                "promptTokensDetails": {
+                    "cachedTokens": 20,
+                    "audioTokens": null,
+                    "videoTokens": null
+                },
+                "completionTokensDetails": {
+                    "reasoningTokens": 10,
+                    "imageTokens": null
+                },
+                "finishReason": "stop",
+                "normalizedFinishReason": "stop",
+                "providerName": "OpenAI",
+                "providerSlug": "openai",
+                "inputUnitPrice": 0.0001,
+                "outputUnitPrice": 0.00015
+            }
+        ]
+    },
+    "exported_at": "2026-10-21T12:46:23.639Z"
+}

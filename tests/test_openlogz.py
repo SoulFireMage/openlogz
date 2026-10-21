@@ -124,6 +124,23 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(t["turns"][3]["variants"][0]["gen"], "gen1")
         self.assertEqual(t["turns"][1]["variants"][0]["usage"]["total"], 12)
 
+    def test_real_broadcast_file(self):
+        """A real file from the bucket (user id redacted)."""
+        real = json.loads((Path(__file__).parent / "fixtures" /
+                           "openrouter_test_trace.json").read_text())
+        self.assertEqual(openlogz.generations(real["trace"]), [])  # test button: skipped
+        live = json.loads(json.dumps(real))
+        live["trace"]["metadata"] = {}
+        live["trace"]["tags"] = []
+        live["trace"]["apiKeyName"] = "roleplay"
+        live["trace"]["sessionId"] = "chat123"
+        (g,) = openlogz.generations(live["trace"])
+        self.assertEqual(g["input"], [{"role": "user", "content": "What is the capital of France?"}])
+        self.assertEqual(g["output"][0]["content"], "The capital of France is Paris.")
+        self.assertEqual(g["model"], "openai/gpt-4-turbo")
+        self.assertEqual(g["session"], "chat123")
+        self.assertEqual(g["usage"], {"in": 50.0, "out": 100.0, "total": 150.0, "cost": 0.02})
+
     def test_content_parts_and_choices(self):
         t = trace(1, [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}], "x")
         t["trace"]["observations"][0]["output"] = {

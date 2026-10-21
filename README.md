@@ -80,7 +80,15 @@ SoulFireMage/openrouter-claude#19), which reaches the traces as `sessionId`.
 <https://huggingface.co/spaces/SoulFireMage/openlogz>. In **Settings → Storage
 Buckets**, attach `SoulFireMage/openrouter-rp-logs` at `/data` (one-time). The page
 rebuilds itself when new files land, at most every 30 seconds, and `/refresh` forces
-a rebuild. **Keep the Space private.** It has no login of its own.
+a rebuild.
+
+**Sharing:** a *protected* Space hides its Hub page and code. Other people get a 404 at
+`huggingface.co/spaces/SoulFireMage/openlogz`, but the app itself is open at
+<https://soulfiremage-openlogz.hf.space> to anyone with that link, so share that one.
+To require a password, add an `APP_PASSWORD` secret in the Space settings. Without one,
+anyone with the link can read the logs and use Import.
+
+OpenRouter's Test Connection trace ("What is the capital of France?") is skipped.
 
 **Book view** (the default): the AI's text is laid out as prose, your turns are
 marked asides, and a new chapter starts each day (or every 30 turns when dates are

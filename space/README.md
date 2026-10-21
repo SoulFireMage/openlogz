@@ -21,5 +21,5 @@ commit of that repository (see `REF` in the `Dockerfile`).
 
 - **Bucket:** attach `SoulFireMage/openrouter-rp-logs` at `/data` (Settings → Storage
   Buckets).
-- **Keep this Space private.** The server has no login of its own, so the Space's
-  privacy is what keeps the logs private.
+- **Sharing:** with a protected Space, share https://soulfiremage-openlogz.hf.space
+  (the Hub page 404s for others). Optional `APP_PASSWORD` secret adds a login.

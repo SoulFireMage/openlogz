@@ -167,9 +167,12 @@ def number(v):
 
 def usage_of(obs: dict) -> dict:
     u = first(obs, "usage", "usageDetails", "usage_details", default={}) or {}
-    inp = first(u, "input", "promptTokens", "prompt_tokens", "input_tokens")
-    out = first(u, "output", "completionTokens", "completion_tokens", "output_tokens")
-    tot = first(u, "total", "totalTokens", "total_tokens")
+    # OpenRouter Broadcast puts the counts on the observation itself
+    inp = first(u, "input", "promptTokens", "prompt_tokens", "input_tokens",
+                default=obs.get("promptTokens"))
+    out = first(u, "output", "completionTokens", "completion_tokens", "output_tokens",
+                default=obs.get("completionTokens"))
+    tot = first(u, "total", "totalTokens", "total_tokens", default=obs.get("totalTokens"))
     cost = first(obs, "calculatedTotalCost", "totalCost", "cost")
     if cost is None:
         c = first(obs, "costDetails", "cost_details", default={}) or {}
@@ -186,8 +189,17 @@ def usage_of(obs: dict) -> dict:
     return out_d
 
 
+def is_test_trace(trace: dict) -> bool:
+    """The trace OpenRouter sends from its Test Connection button."""
+    meta = trace.get("metadata") or {}
+    return meta.get("source") == "observability-test-button" or (
+        "test" in (trace.get("tags") or []) and trace.get("apiKeyName") == "Test API Key")
+
+
 def generations(trace: dict) -> list[dict]:
     """Flatten one trace into the LLM generations it contains."""
+    if is_test_trace(trace):
+        return []
     obs_list = first(trace, "observations", "spans", "generations", default=[]) or []
     gens = []
     for obs in obs_list:

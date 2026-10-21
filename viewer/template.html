@@ -65,6 +65,10 @@ main { overflow: auto; min-height: 0; }
   padding: 12px 16px; }
 .turn.user .bubble { background: var(--user); }
 .bubble p { margin: 0 0 .8em; } .bubble p:last-child { margin: 0; }
+.bq { display: block; border-left: 3px solid var(--line); padding-left: 10px; margin: 2px 0; }
+.book .turn p:has(> .bq:first-child) { text-indent: 0; }
+hr { border: 0; text-align: center; margin: 1.2em 0; }
+hr::after { content: "⁂"; color: var(--muted); }
 .bubble em { color: var(--em); } .q { color: var(--quote); }
 mark { background: var(--mark); color: inherit; border-radius: 2px; }
 .swipe { display: inline-flex; gap: 4px; align-items: center; }
@@ -156,7 +160,11 @@ function render(text, hl) {
     const re = new RegExp("(" + hl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")(?![^<]*>)", "gi");
     h = h.replace(re, "<mark>$1</mark>");
   }
-  return h.split(/\n{2,}/).map(p => "<p>" + p.replace(/\n/g, "<br>") + "</p>").join("");
+  // "> " lines are quotes (DeepSeek uses them for dialogue), "---" a scene break
+  h = h.replace(/^&gt; ?(.*)$/gm, '<span class="bq">$1</span>')
+       .replace(/^[ \t]*(-{3,}|\*{3,})[ \t]*$/gm, "<hr>");
+  return h.split(/\n{2,}/).map(p => p === "<hr>" ? p : "<p>" + p.replace(/\n/g, "<br>")
+    .replace(/<br>(<span class="bq">)/g, "$1").replace(/(<\/span>)<br>(?=<span class="bq">)/g, "$1") + "</p>").join("");
 }
 
 const chosen = t => t.variants[t.chosen] || t.variants[0];
