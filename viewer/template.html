@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenLogz Reader</title>
+<style>
+:root {
+  --bg: #f7f5f2; --panel: #ffffff; --ink: #1f1d1a; --muted: #6b665e;
+  --line: #e4e0d9; --accent: #6d4bd8; --user: #eef0ff; --ai: #ffffff;
+  --em: #5a4a8a; --quote: #8a4b1f; --mark: #ffe58a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15141a; --panel: #1d1c24; --ink: #e9e6f0; --muted: #9a95a8;
+    --line: #2e2c38; --accent: #a78bfa; --user: #262640; --ai: #1d1c24;
+    --em: #c4b5fd; --quote: #f0b27a; --mark: #6b5a00;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15141a; --panel: #1d1c24; --ink: #e9e6f0; --muted: #9a95a8;
+  --line: #2e2c38; --accent: #a78bfa; --user: #262640; --ai: #1d1c24;
+  --em: #c4b5fd; --quote: #f0b27a; --mark: #6b5a00;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 16px/1.6 Georgia, "Iowan Old Style", serif; }
+button, input, select { font: inherit; font-family: system-ui, sans-serif; font-size: 14px; }
+.app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+aside { border-right: 1px solid var(--line); background: var(--panel);
+  display: flex; flex-direction: column; min-height: 0; }
+.side-head { padding: 12px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
+.side-head h1 { margin: 0; font: 600 16px system-ui, sans-serif; display: flex;
+  justify-content: space-between; align-items: center; }
+input[type=search] { width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); color: var(--ink); }
+.list { overflow: auto; flex: 1; }
+.item { padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer;
+  font-family: system-ui, sans-serif; font-size: 13px; }
+.item:hover, .item.on { background: var(--bg); }
+.item.on { box-shadow: inset 3px 0 var(--accent); }
+.item b { display: block; font-weight: 600; color: var(--ink); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap; }
+.item small { color: var(--muted); }
+.item .snip { color: var(--muted); margin-top: 4px; }
+main { overflow: auto; min-height: 0; }
+.thread-head { position: sticky; top: 0; z-index: 2; background: var(--bg);
+  border-bottom: 1px solid var(--line); padding: 10px 16px;
+  font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.thread-head .title { color: var(--ink); font-weight: 600; flex: 1 1 200px; min-width: 0; }
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 8px; padding: 5px 10px; cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.menu { display: none; }
+.turns { max-width: 760px; margin: 0 auto; padding: 16px 16px 120px; }
+.sys { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
+  border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 16px; }
+.sys pre, details pre { white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; }
+.turn { margin: 0 0 18px; content-visibility: auto; contain-intrinsic-size: auto 200px; }
+.meta { font-family: system-ui, sans-serif; font-size: 12px; color: var(--muted);
+  display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
+.meta .who { font-weight: 600; color: var(--accent); }
+.bubble { background: var(--ai); border: 1px solid var(--line); border-radius: 12px;
+  padding: 12px 16px; }
+.turn.user .bubble { background: var(--user); }
+.bubble p { margin: 0 0 .8em; } .bubble p:last-child { margin: 0; }
+.bubble em { color: var(--em); } .q { color: var(--quote); }
+mark { background: var(--mark); color: inherit; border-radius: 2px; }
+.swipe { display: inline-flex; gap: 4px; align-items: center; }
+.swipe button { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  border-radius: 6px; padding: 0 6px; cursor: pointer; }
+details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
+  margin-bottom: 8px; }
+.empty { padding: 40px; text-align: center; color: var(--muted); font-family: system-ui, sans-serif; }
+.flash { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 12px; }
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; }
+  aside { position: fixed; inset: 0; z-index: 5; display: none; }
+  aside.open { display: flex; }
+  .menu { display: inline-block; }
+  .turns { padding: 12px 16px 100px; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside id="side">
+    <div class="side-head">
+      <h1>OpenLogz <span>
+        <button class="btn" id="theme" title="Toggle theme">◐</button>
+        <button class="btn menu" id="close">✕</button></span></h1>
+      <input type="search" id="q" placeholder="Search all conversations…">
+      <small id="stats" style="color:var(--muted);font-family:system-ui"></small>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+  <main id="main"><div class="empty">Pick a conversation.</div></main>
+</div>
+<script>
+const DATA = /*__OPENLOGZ_DATA__*/null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmtDate = s => s ? new Date(s).toLocaleString() : "";
+const fmtNum = n => (n || 0).toLocaleString();
+let current = null, query = "";
+
+try { const t = localStorage.getItem("olz-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+$("#theme").onclick = () => {
+  const root = document.documentElement;
+  const dark = root.dataset.theme ? root.dataset.theme === "dark"
+    : matchMedia("(prefers-color-scheme: dark)").matches;
+  root.dataset.theme = dark ? "light" : "dark";
+  try { localStorage.setItem("olz-theme", root.dataset.theme); } catch {}
+};
+
+// Role-play friendly text: paragraphs, *actions*, **bold**, "dialogue".
+function render(text, hl) {
+  let h = esc(text);
+  h = h.replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+       .replace(/\*([^*\n]+)\*/g, "<em>$1</em>")
+       .replace(/(&quot;|“)([^\n]*?)(&quot;|”)/g, '<span class="q">$1$2$3</span>');
+  if (hl) {
+    const re = new RegExp("(" + hl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + ")(?![^<]*>)", "gi");
+    h = h.replace(re, "<mark>$1</mark>");
+  }
+  return h.split(/\n{2,}/).map(p => "<p>" + p.replace(/\n/g, "<br>") + "</p>").join("");
+}
+
+const chosen = t => t.variants[t.chosen] || t.variants[0];
+
+function listThreads() {
+  const q = query.toLowerCase();
+  const rows = [];
+  for (const th of DATA.threads) {
+    if (!q) { rows.push({ th }); continue; }
+    const hits = [];
+    th.turns.forEach((t, i) => t.variants.forEach((v, k) => {
+      const at = (v.content || "").toLowerCase().indexOf(q);
+      if (at >= 0) hits.push({ i, k, at, text: v.content });
+    }));
+    if (hits.length) rows.push({ th, hits });
+  }
+  $("#list").innerHTML = rows.map(({ th, hits }) => {
+    const snip = hits ? (() => { const h = hits[0];
+      const s = h.text.slice(Math.max(0, h.at - 40), h.at + 80);
+      return `<div class="snip">${hits.length} hit${hits.length > 1 ? "s" : ""} · …${esc(s)}…</div>`; })() : "";
+    return `<div class="item ${current === th ? "on" : ""}" data-id="${th.id}"
+        data-turn="${hits ? hits[0].i : ""}" data-var="${hits ? hits[0].k : ""}">
+      <b>${esc(th.title)}</b>
+      <small>${fmtDate(th.updated)} · ${th.turns_count} turns · ${fmtNum(th.words)} words${th.forked_from ? " · fork" : ""}</small>${snip}</div>`;
+  }).join("") || `<div class="empty">No matches.</div>`;
+}
+
+function openThread(id, turn, variant) {
+  const th = DATA.threads.find(t => t.id === id);
+  if (!th) return;
+  current = th;
+  if (turn !== undefined && variant !== undefined) th.turns[turn].chosen = variant;
+  const fork = th.forked_from
+    ? ` · forked from <a href="#" data-goto="${th.forked_from.thread}" data-turn="${th.forked_from.turn}">${th.forked_from.thread}</a> at turn ${th.forked_from.turn + 1}` : "";
+  $("#main").innerHTML = `
+    <div class="thread-head">
+      <button class="btn menu" id="open">☰</button>
+      <span class="title">${esc(th.title)}</span>
+      <span>${th.models.map(esc).join(", ")} · ${fmtNum(th.tokens)} tok${th.cost ? " · $" + th.cost.toFixed(2) : ""}${fork}</span>
+      <button class="btn" id="top">Start</button>
+      <button class="btn" id="end">Latest</button>
+      <button class="btn" id="md">Export .md</button>
+    </div>
+    <div class="turns">
+      ${th.system ? `<details class="sys"><summary>System prompt (${fmtNum(th.system.split(/\s+/).length)} words)</summary><pre>${esc(th.system)}</pre></details>` : ""}
+      ${th.turns.map((t, i) => turnHtml(t, i)).join("")}
+    </div>`;
+  $("#open").onclick = () => $("#side").classList.add("open");
+  $("#top").onclick = () => $("#main").scrollTo({ top: 0 });
+  $("#end").onclick = () => $("#main").scrollTo({ top: $("#main").scrollHeight });
+  $("#md").onclick = () => exportMd(th);
+  $("#side").classList.remove("open");
+  listThreads();
+  if (turn !== undefined && turn !== "") {
+    const el = document.getElementById("turn-" + turn);
+    if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("flash");
+      setTimeout(() => el.classList.remove("flash"), 1500); }
+  } else $("#main").scrollTo({ top: 0 });
+}
+
+function turnHtml(t, i) {
+  const v = chosen(t), n = t.variants.length;
+  const swipe = n > 1 ? `<span class="swipe"><button data-swipe="${i}" data-d="-1">‹</button>
+    ${t.chosen + 1}/${n}<button data-swipe="${i}" data-d="1">›</button></span>` : "";
+  const reason = v.reasoning ? `<details class="reason"><summary>Reasoning</summary><pre>${esc(v.reasoning)}</pre></details>` : "";
+  return `<div class="turn ${t.role}" id="turn-${i}">
+    <div class="meta"><span class="who">${t.role === "user" ? "User" : "AI"}</span>
+      <span>#${i + 1}</span>${v.ts ? `<span>${fmtDate(v.ts)}</span>` : ""}
+      ${v.model ? `<span>${esc(v.model)}</span>` : ""}${swipe}</div>
+    ${reason}<div class="bubble">${render(v.content, query)}</div></div>`;
+}
+
+function exportMd(th) {
+  const md = [`# ${th.title}`, "", ...th.turns.flatMap(t =>
+    [`### ${t.role === "user" ? "User" : "AI"}`, "", chosen(t).content, ""])].join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([md], { type: "text/markdown" }));
+  a.download = th.id + ".md"; a.click();
+}
+
+document.addEventListener("click", e => {
+  const item = e.target.closest(".item");
+  if (item) return openThread(item.dataset.id,
+    item.dataset.turn === "" ? undefined : +item.dataset.turn,
+    item.dataset.var === "" ? undefined : +item.dataset.var);
+  const sw = e.target.closest("[data-swipe]");
+  if (sw) {
+    const i = +sw.dataset.swipe, t = current.turns[i];
+    t.chosen = (t.chosen + +sw.dataset.d + t.variants.length) % t.variants.length;
+    document.getElementById("turn-" + i).outerHTML = turnHtml(t, i);
+    return;
+  }
+  const go = e.target.closest("[data-goto]");
+  if (go) { e.preventDefault(); openThread(go.dataset.goto, +go.dataset.turn); }
+});
+$("#close").onclick = () => $("#side").classList.remove("open");
+let timer;
+$("#q").oninput = e => { clearTimeout(timer); timer = setTimeout(() => {
+  query = e.target.value.trim(); listThreads();
+  if (current) openThread(current.id); }, 200); };
+
+if (!DATA) {
+  $("#main").innerHTML = `<div class="empty">No data embedded. Run <code>python openlogz.py build</code>.</div>`;
+} else {
+  const tok = DATA.threads.reduce((a, t) => a + t.tokens, 0);
+  $("#stats").textContent = `${DATA.threads.length} threads · ${fmtNum(DATA.generations)} requests · ${fmtNum(tok)} tokens`;
+  listThreads();
+  if (DATA.threads.length) openThread(DATA.threads[0].id);
+}
+</script>
+</body>
+</html>
