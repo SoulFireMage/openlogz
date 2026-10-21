@@ -26,9 +26,13 @@
 body { margin: 0; background: var(--bg); color: var(--ink);
   font: 16px/1.6 Georgia, "Iowan Old Style", serif; }
 button, input, select { font: inherit; font-family: system-ui, sans-serif; font-size: 14px; }
-.app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+.app { display: grid; grid-template-columns: 320px 1fr; height: 100vh;
+  transition: grid-template-columns .2s ease; }
 aside { border-right: 1px solid var(--line); background: var(--panel);
-  display: flex; flex-direction: column; min-height: 0; }
+  display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+/* Sidebar tucked away (wide screens): the reading pane takes the full width */
+.app.tucked { grid-template-columns: 0 1fr; }
+.app.tucked aside { visibility: hidden; border-right: 0; }
 .side-head { padding: 12px; border-bottom: 1px solid var(--line); display: grid; gap: 8px; }
 .side-head h1 { margin: 0; font: 600 16px system-ui, sans-serif; display: flex;
   justify-content: space-between; align-items: center; }
@@ -52,7 +56,6 @@ main { overflow: auto; min-height: 0; }
 .btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
   border-radius: 8px; padding: 5px 10px; cursor: pointer; }
 .btn:hover { border-color: var(--accent); }
-.menu { display: none; }
 .turns { max-width: var(--chat-width, 760px); margin: 0 auto; padding: 16px 16px 120px; }
 .sys { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
   border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 16px; }
@@ -101,10 +104,9 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
 .empty { padding: 40px; text-align: center; color: var(--muted); font-family: system-ui, sans-serif; }
 .flash { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 12px; }
 @media (max-width: 760px) {
-  .app { grid-template-columns: 1fr; }
-  aside { position: fixed; inset: 0; z-index: 5; display: none; }
-  aside.open { display: flex; }
-  .menu { display: inline-block; }
+  .app, .app.tucked { grid-template-columns: 1fr; }
+  aside, .app.tucked aside { position: fixed; inset: 0; z-index: 5; display: none; visibility: visible; }
+  aside.open, .app.tucked aside.open { display: flex; }
   .thread-head .info, .thread-head .wide, .thread-head .width { display: none; }
   .turns { padding: 12px 16px 100px; }
 }
@@ -117,7 +119,7 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
     <div class="side-head">
       <h1>OpenLogz <span>
         <button class="btn" id="theme" title="Toggle theme">◐</button>
-        <button class="btn menu" id="close">✕</button></span></h1>
+        <button class="btn" id="close" title="Hide the list">✕</button></span></h1>
       <input type="search" id="q" placeholder="Search all conversations…">
       <small id="stats" style="color:var(--muted);font-family:system-ui"></small>
       <div id="import-row" hidden>
@@ -217,7 +219,7 @@ function openThread(id, turn, variant) {
     ? ` · forked from <a href="#" data-goto="${th.forked_from.thread}" data-turn="${th.forked_from.turn}">${th.forked_from.thread}</a> at turn ${th.forked_from.turn + 1}` : "";
   $("#main").innerHTML = `
     <div class="thread-head">
-      <button class="btn menu" id="open">☰</button>
+      <button class="btn" id="open" title="Show or hide the list">☰</button>
       <span class="title">${esc(th.title)}</span>
       <span class="readtime" id="readtime"></span>
       <span class="info">${th.models.map(esc).join(", ")} · ${fmtNum(th.tokens)} tok${th.cost ? " · $" + th.cost.toFixed(2) : ""}${fork}</span>
@@ -232,7 +234,7 @@ function openThread(id, turn, variant) {
       ${th.system ? `<details class="sys"><summary>System prompt (${fmtNum(th.system.split(/\s+/).length)} words)</summary><pre>${esc(th.system)}</pre></details>` : ""}
       ${mode === "book" ? bookHtml(th) : th.turns.map((t, i) => turnHtml(t, i)).join("")}
     </div>`;
-  $("#open").onclick = () => $("#side").classList.add("open");
+  $("#open").onclick = () => narrow() ? $("#side").classList.add("open") : setTucked(!tucked);
   $("#top").onclick = () => $("#main").scrollTo({ top: 0 });
   $("#end").onclick = () => $("#main").scrollTo({ top: $("#main").scrollHeight });
   $("#md").onclick = () => exportMd(th);
@@ -368,7 +370,18 @@ if (location.protocol.startsWith("http")) {
     } catch (err) { $("#import-status").textContent = " Import failed: " + err.message; }
   };
 }
-$("#close").onclick = () => $("#side").classList.remove("open");
+// Phones: the list is an overlay opened by ☰. Wider screens: ☰ and ✕ tuck
+// it away and bring it back, remembered; it starts tucked on a portrait
+// tablet unless you have chosen otherwise.
+const narrow = () => matchMedia("(max-width: 760px)").matches;
+let tucked = store.get("tucked", matchMedia("(orientation: portrait) and (max-width: 1100px)").matches);
+function setTucked(v, save = true) {
+  tucked = v;
+  $(".app").classList.toggle("tucked", v);
+  if (save) store.set("tucked", v);
+}
+setTucked(tucked, false);
+$("#close").onclick = () => narrow() ? $("#side").classList.remove("open") : setTucked(true);
 let timer;
 $("#q").oninput = e => { clearTimeout(timer); timer = setTimeout(() => {
   query = e.target.value.trim(); listThreads();
