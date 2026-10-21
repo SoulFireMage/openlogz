@@ -89,6 +89,7 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
 .book .turn.user .who { font: 600 11px system-ui, sans-serif; letter-spacing: .1em;
   text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
 .book .swipe { font: 12px system-ui, sans-serif; color: var(--muted); }
+.readtime { color: var(--muted); white-space: nowrap; }
 .width { display: inline-flex; align-items: center; gap: 4px; color: var(--muted);
   font: 13px system-ui, sans-serif; }
 .width input { width: 110px; accent-color: var(--accent); }
@@ -218,6 +219,7 @@ function openThread(id, turn, variant) {
     <div class="thread-head">
       <button class="btn menu" id="open">☰</button>
       <span class="title">${esc(th.title)}</span>
+      <span class="readtime" id="readtime"></span>
       <span class="info">${th.models.map(esc).join(", ")} · ${fmtNum(th.tokens)} tok${th.cost ? " · $" + th.cost.toFixed(2) : ""}${fork}</span>
       <span class="seg"><button data-mode="book" class="${mode === "book" ? "on" : ""}">Book</button><button data-mode="chat" class="${mode === "chat" ? "on" : ""}">Chat</button></span>
       ${mode === "book" ? `<button class="btn" data-size="-1">A−</button><button class="btn" data-size="1">A+</button>` : ""}
@@ -245,6 +247,7 @@ function openThread(id, turn, variant) {
     else if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("flash");
       setTimeout(() => el.classList.remove("flash"), 1500); }
   } else $("#main").scrollTo({ top: 0 });
+  updateReadTime();
 }
 
 // Book view: chapters at each new day (or every 30 turns when dates are
@@ -311,6 +314,29 @@ document.addEventListener("click", e => {
   if (go) { e.preventDefault(); openThread(go.dataset.goto, +go.dataset.turn); }
 });
 // Remember where you were reading in each thread.
+// Reading time at an average adult pace, and how much is left from the
+// turn at the top of the screen.
+const WPM = 250;
+const wordCount = text => (text.match(/\S+/g) || []).length;
+function fmtDur(words) {
+  const min = Math.max(1, Math.round(words / WPM));
+  if (min < 60) return `${min} min`;
+  const h = Math.floor(min / 60), m = min % 60;
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+function updateReadTime() {
+  const el = $("#readtime");
+  if (!el || !current) return;
+  const words = current.turns.map(t => wordCount(chosen(t).content));
+  const total = words.reduce((a, b) => a + b, 0);
+  const at = visibleTurn() || 0;
+  const read = words.slice(0, at).reduce((a, b) => a + b, 0);
+  el.textContent = read > 0
+    ? `${Math.round(100 * read / total)}% · ~${fmtDur(total - read)} left`
+    : `${fmtNum(total)} words · ~${fmtDur(total)} read`;
+  el.title = `${fmtNum(total)} words, about ${fmtDur(total)} at ${WPM} words a minute`;
+}
+
 function visibleTurn() {
   const top = $("#main").getBoundingClientRect().top + 60;
   for (const el of document.querySelectorAll(".turn")) {
@@ -323,7 +349,7 @@ $("#main").addEventListener("scroll", () => {
   const m = $("#main"), max = m.scrollHeight - m.clientHeight;
   $("#progress").style.width = (max > 0 ? 100 * m.scrollTop / max : 0) + "%";
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { if (current) { const t = visibleTurn(); if (t !== undefined) store.set("pos-" + current.id, t); } }, 400);
+  saveTimer = setTimeout(() => { if (current) { const t = visibleTurn(); if (t !== undefined) store.set("pos-" + current.id, t); updateReadTime(); } }, 400);
 });
 
 // In the Space (served over http), exports from the chat app can be uploaded.
@@ -352,7 +378,8 @@ if (!DATA) {
   $("#main").innerHTML = `<div class="empty">No data embedded. Run <code>python openlogz.py build</code>.</div>`;
 } else {
   const tok = DATA.threads.reduce((a, t) => a + t.tokens, 0);
-  $("#stats").textContent = `${DATA.threads.length} threads · ${fmtNum(DATA.generations)} requests · ${fmtNum(tok)} tokens`;
+  const words = DATA.threads.reduce((a, t) => a + (t.words || 0), 0);
+  $("#stats").textContent = `${DATA.threads.length} threads · ${fmtNum(words)} words (~${fmtDur(words)} to read) · ${fmtNum(tok)} tokens billed`;
   listThreads();
   if (DATA.threads.length) openThread(DATA.threads[0].id);
 }
