@@ -72,6 +72,24 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
   border-radius: 6px; padding: 0 6px; cursor: pointer; }
 details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
   margin-bottom: 8px; }
+.book { max-width: 36em; margin: 0 auto; padding: 24px 20px 160px;
+  font-size: var(--book-size, 19px); line-height: 1.75; }
+.book h2 { font: 600 13px system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); text-align: center; margin: 56px 0 28px; }
+.book h2:first-child { margin-top: 8px; }
+.book h2 small { display: block; letter-spacing: 0; text-transform: none; font-weight: 400; }
+.book .turn { margin: 0 0 1.2em; }
+.book .turn p { margin: 0 0 .9em; text-indent: 1.4em; }
+.book .turn p:first-of-type { text-indent: 0; }
+.book .turn.user { border-left: 2px solid var(--accent); padding-left: 14px; color: var(--muted); }
+.book .turn.user .who { font: 600 11px system-ui, sans-serif; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
+.book .swipe { font: 12px system-ui, sans-serif; color: var(--muted); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.seg button { border: 0; background: var(--panel); color: var(--ink); padding: 5px 10px; cursor: pointer; }
+.seg button.on { background: var(--accent); color: #fff; }
+#progress { position: fixed; top: 0; left: 0; height: 3px; background: var(--accent);
+  z-index: 10; width: 0; }
 .empty { padding: 40px; text-align: center; color: var(--muted); font-family: system-ui, sans-serif; }
 .flash { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 12px; }
 @media (max-width: 760px) {
@@ -79,11 +97,13 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
   aside { position: fixed; inset: 0; z-index: 5; display: none; }
   aside.open { display: flex; }
   .menu { display: inline-block; }
+  .thread-head .info, .thread-head .wide { display: none; }
   .turns { padding: 12px 16px 100px; }
 }
 </style>
 </head>
 <body>
+<div id="progress"></div>
 <div class="app">
   <aside id="side">
     <div class="side-head">
@@ -92,6 +112,11 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
         <button class="btn menu" id="close">✕</button></span></h1>
       <input type="search" id="q" placeholder="Search all conversations…">
       <small id="stats" style="color:var(--muted);font-family:system-ui"></small>
+      <div id="import-row" hidden>
+        <button class="btn" id="import-btn">Import chat export…</button>
+        <input type="file" id="import-file" accept=".json,application/json" hidden>
+        <small id="import-status" style="color:var(--muted);font-family:system-ui"></small>
+      </div>
     </div>
     <div class="list" id="list"></div>
   </aside>
@@ -105,6 +130,12 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
 const fmtDate = s => s ? new Date(s).toLocaleString() : "";
 const fmtNum = n => (n || 0).toLocaleString();
 let current = null, query = "";
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("olz-" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("olz-" + k, JSON.stringify(v)); } catch {} }
+};
+let mode = store.get("mode", "book"), bookSize = store.get("size", 19);
+document.documentElement.style.setProperty("--book-size", bookSize + "px");
 
 try { const t = localStorage.getItem("olz-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
 $("#theme").onclick = () => {
@@ -164,14 +195,16 @@ function openThread(id, turn, variant) {
     <div class="thread-head">
       <button class="btn menu" id="open">☰</button>
       <span class="title">${esc(th.title)}</span>
-      <span>${th.models.map(esc).join(", ")} · ${fmtNum(th.tokens)} tok${th.cost ? " · $" + th.cost.toFixed(2) : ""}${fork}</span>
-      <button class="btn" id="top">Start</button>
+      <span class="info">${th.models.map(esc).join(", ")} · ${fmtNum(th.tokens)} tok${th.cost ? " · $" + th.cost.toFixed(2) : ""}${fork}</span>
+      <span class="seg"><button data-mode="book" class="${mode === "book" ? "on" : ""}">Book</button><button data-mode="chat" class="${mode === "chat" ? "on" : ""}">Chat</button></span>
+      ${mode === "book" ? `<button class="btn" data-size="-1">A−</button><button class="btn" data-size="1">A+</button>` : ""}
+      <button class="btn wide" id="top">Start</button>
       <button class="btn" id="end">Latest</button>
       <button class="btn" id="md">Export .md</button>
     </div>
-    <div class="turns">
+    <div class="${mode === "book" ? "book" : "turns"}">
       ${th.system ? `<details class="sys"><summary>System prompt (${fmtNum(th.system.split(/\s+/).length)} words)</summary><pre>${esc(th.system)}</pre></details>` : ""}
-      ${th.turns.map((t, i) => turnHtml(t, i)).join("")}
+      ${mode === "book" ? bookHtml(th) : th.turns.map((t, i) => turnHtml(t, i)).join("")}
     </div>`;
   $("#open").onclick = () => $("#side").classList.add("open");
   $("#top").onclick = () => $("#main").scrollTo({ top: 0 });
@@ -179,11 +212,37 @@ function openThread(id, turn, variant) {
   $("#md").onclick = () => exportMd(th);
   $("#side").classList.remove("open");
   listThreads();
+  const resumed = turn === undefined;
+  if (resumed) turn = store.get("pos-" + th.id, undefined);
   if (turn !== undefined && turn !== "") {
     const el = document.getElementById("turn-" + turn);
-    if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("flash");
+    if (el && resumed) el.scrollIntoView({ block: "start" });
+    else if (el) { el.scrollIntoView({ block: "center" }); el.classList.add("flash");
       setTimeout(() => el.classList.remove("flash"), 1500); }
   } else $("#main").scrollTo({ top: 0 });
+}
+
+// Book view: chapters at each new day (or every 30 turns when dates are
+// unknown), the AI's text as prose, your turns as marked asides.
+function bookHtml(th) {
+  let out = "", ch = 0, lastDay = null, since = 0;
+  th.turns.forEach((t, i) => {
+    const v = chosen(t), day = v.ts ? new Date(v.ts).toDateString() : null;
+    if (i === 0 || (day && day !== lastDay && t.role === "user") || (!day && since >= 30 && t.role === "user")) {
+      ch++; since = 0;
+      out += `<h2>Chapter ${ch}${day ? `<small>${new Date(v.ts).toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</small>` : ""}</h2>`;
+    }
+    if (day) lastDay = day;
+    since++;
+    out += bookTurn(t, i);
+  });
+  return out;
+}
+
+function bookTurn(t, i) {
+  const v = chosen(t), n = t.variants.length;
+  const swipe = n > 1 ? ` <span class="swipe"><button data-swipe="${i}" data-d="1" title="Other versions of this reply">↻ ${t.chosen + 1}/${n}</button></span>` : "";
+  return `<div class="turn ${t.role}" id="turn-${i}">${t.role === "user" ? `<span class="who">You</span>` : ""}${render(v.content, query)}${swipe}</div>`;
 }
 
 function turnHtml(t, i) {
@@ -215,12 +274,49 @@ document.addEventListener("click", e => {
   if (sw) {
     const i = +sw.dataset.swipe, t = current.turns[i];
     t.chosen = (t.chosen + +sw.dataset.d + t.variants.length) % t.variants.length;
-    document.getElementById("turn-" + i).outerHTML = turnHtml(t, i);
+    document.getElementById("turn-" + i).outerHTML = mode === "book" ? bookTurn(t, i) : turnHtml(t, i);
     return;
   }
+  const md = e.target.closest("[data-mode]");
+  if (md) { mode = md.dataset.mode; store.set("mode", mode); return openThread(current.id, visibleTurn()); }
+  const sz = e.target.closest("[data-size]");
+  if (sz) { bookSize = Math.max(14, Math.min(28, bookSize + +sz.dataset.size)); store.set("size", bookSize);
+    document.documentElement.style.setProperty("--book-size", bookSize + "px"); return; }
   const go = e.target.closest("[data-goto]");
   if (go) { e.preventDefault(); openThread(go.dataset.goto, +go.dataset.turn); }
 });
+// Remember where you were reading in each thread.
+function visibleTurn() {
+  const top = $("#main").getBoundingClientRect().top + 60;
+  for (const el of document.querySelectorAll(".turn")) {
+    if (el.getBoundingClientRect().bottom > top) return +el.id.slice(5);
+  }
+  return undefined;
+}
+let saveTimer;
+$("#main").addEventListener("scroll", () => {
+  const m = $("#main"), max = m.scrollHeight - m.clientHeight;
+  $("#progress").style.width = (max > 0 ? 100 * m.scrollTop / max : 0) + "%";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => { if (current) { const t = visibleTurn(); if (t !== undefined) store.set("pos-" + current.id, t); } }, 400);
+});
+
+// In the Space (served over http), exports from the chat app can be uploaded.
+if (location.protocol.startsWith("http")) {
+  $("#import-row").hidden = false;
+  $("#import-btn").onclick = () => $("#import-file").click();
+  $("#import-file").onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    $("#import-status").textContent = " Uploading…";
+    try {
+      const res = await fetch("import", { method: "POST", headers: { "Content-Type": "application/json" }, body: await f.text() });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || res.status);
+      $("#import-status").textContent = ` Imported ${j.chats} chats. Reloading…`;
+      setTimeout(() => location.reload(), 800);
+    } catch (err) { $("#import-status").textContent = " Import failed: " + err.message; }
+  };
+}
 $("#close").onclick = () => $("#side").classList.remove("open");
 let timer;
 $("#q").oninput = e => { clearTimeout(timer); timer = setTimeout(() => {

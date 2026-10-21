@@ -92,6 +92,38 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(fork["turns"][-1]["variants"][0]["content"], "Docking.")
         self.assertIn("New story: a", threads)
 
+    def test_export_seeds_threads_that_traces_continue(self):
+        export = {"format": "openrouter-chat", "version": 1,
+                  "exportedAt": "2026-10-20T00:00:00Z",
+                  "chats": [{"id": "c1", "title": "The Meridian", "created": 1760000000000,
+                             "updated": 1760900000000, "messages": [
+                                 U("Status?"),
+                                 {"role": "assistant", "content": "Green.", "model": "deepseek/x",
+                                  "usage": {"prompt_tokens": 10, "completion_tokens": 2,
+                                            "cost": 0.5}},
+                                 U("Engage."),
+                                 A("Engaging.")]}],
+                  "profiles": []}
+        older = dict(export, exportedAt="2026-10-01T00:00:00Z",
+                     chats=[dict(export["chats"][0], messages=export["chats"][0]["messages"][:2])])
+        h = [U("Status?"), A("Green."), U("Engage.")]
+        traces = [
+            older, export,
+            trace(1, h, "Engaging."),                       # already in the export
+            trace(2, h + [A("Engaging."), U("Faster.")], "Max warp."),
+        ]
+        data = self.build(traces)
+        self.assertEqual(data["imported"], 1)
+        self.assertEqual(len(data["threads"]), 1)
+        t = data["threads"][0]
+        self.assertEqual(t["title"], "The Meridian")
+        self.assertEqual([chosen["content"] for chosen in
+                          (x["variants"][x["chosen"]] for x in t["turns"])],
+                         ["Status?", "Green.", "Engage.", "Engaging.", "Faster.", "Max warp."])
+        self.assertEqual(len(t["turns"][3]["variants"]), 1)
+        self.assertEqual(t["turns"][3]["variants"][0]["gen"], "gen1")
+        self.assertEqual(t["turns"][1]["variants"][0]["usage"]["total"], 12)
+
     def test_content_parts_and_choices(self):
         t = trace(1, [{"role": "user", "content": [{"type": "text", "text": "Hi"}]}], "x")
         t["trace"]["observations"][0]["output"] = {

@@ -4,20 +4,20 @@ Send OpenRouter request logs (prompts and completions) to a private Hugging Face
 Storage Bucket, then rebuild them into readable role-play conversations.
 
 ```
-OpenRouter ──Broadcast──▶ HF bucket ──sync──▶ data/raw/*.json ──build──▶ out/viewer.html
- (one key)   (1 JSON file                       (local copy)          out/markdown/*.md
-             per request)                                             out/conversations.json
+OpenRouter ──Broadcast──▶ bucket SoulFireMage/openrouter-rp-logs ──▶ Space SoulFireMage/openlogz
+ (RP key)    one JSON file per request                  ▲              (private reader:
+                                                        │               book + chat views)
+OpenRouter Chat app ──Export──▶ imports/*.json ─────────┘
+ (old history, from before Broadcast was on)
 ```
+
+The bucket and the Space already exist, and both are private.
 
 ## Stage 1: get traces into the bucket
 
-### 1. Create a private bucket
+### 1. Bucket
 
-Go to <https://huggingface.co/new-bucket>. Set owner to `SoulFireMage`, pick a name
-(for example `openrouter-rp-logs`), and set it to **Private**. The logs are private
-role-play text, so keep the bucket private.
-
-Or from the CLI: `hf buckets create openrouter-rp-logs --private`
+Already created: `SoulFireMage/openrouter-rp-logs` (private).
 
 ### 2. Make S3 credentials
 
@@ -51,13 +51,44 @@ Then send one message in the role-play and check
 `https://huggingface.co/buckets/SoulFireMage/openrouter-rp-logs`. You should see one
 `{traceId}-{timestamp}.json` file per request.
 
-> **Older chats are not sent.** Broadcast only sends requests made after the
-> destination is set up. OpenRouter's docs say nothing about backfilling earlier
-> requests, so assume the 78M tokens already used will not show up. The best copy of
-> that history is probably your chat interface's own database or export. An
-> `import` command for that is a natural next step.
+### Old history (before Broadcast)
+
+Broadcast only sends requests made after it is set up. OpenRouter's docs say nothing
+about backfilling, and there is no bulk download of past prompts. The full text of
+the old chats is still on the phone, though: OpenRouter Chat keeps every chat on the
+device.
+
+1. In OpenRouter Chat, open the chats drawer and tap **Export** (or Share), which
+   gives you `openrouter-chat-export-YYYY-MM-DD.json`.
+2. In the Space, tap **Import chat export…** and pick that file. You can also drop it
+   into the bucket's `imports/` folder on the website, or run
+   `python openlogz.py import FILE --bucket SoulFireMage/openrouter-rp-logs`.
+
+Imported chats seed the threads. Later traces that carry on a chat are added to it,
+and a turn that is in both is shown once. Exporting again later is safe: for each
+chat, the longest copy is used.
+
+### Chat ids (`session_id`)
+
+OpenRouter Chat now sends each chat's id as `session_id` (see
+SoulFireMage/openrouter-claude#19), which reaches the traces as `sessionId`.
 
 ## Stage 2: read the logs
+
+### In the Space (the easy way)
+
+<https://huggingface.co/spaces/SoulFireMage/openlogz>. In **Settings → Storage
+Buckets**, attach `SoulFireMage/openrouter-rp-logs` at `/data` (one-time). The page
+rebuilds itself when new files land, at most every 30 seconds, and `/refresh` forces
+a rebuild. **Keep the Space private.** It has no login of its own.
+
+**Book view** (the default): the AI's text is laid out as prose, your turns are
+marked asides, and a new chapter starts each day (or every 30 turns when dates are
+unknown). It remembers where you stopped in each thread, has A−/A+ text size, and
+shows a progress bar. **Chat view** has bubbles, swipe switching, reasoning and
+per-turn models.
+
+### Locally
 
 ```bash
 pip install -U huggingface_hub

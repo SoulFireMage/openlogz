@@ -4,6 +4,7 @@ rebuild them into readable conversations.
 
     python openlogz.py sync    --bucket OWNER/NAME [--prefix PATH] [--data DIR]
     python openlogz.py inspect [--data DIR]
+    python openlogz.py import  EXPORT.json [--bucket OWNER/NAME]
     python openlogz.py build   [--data DIR] [--out DIR]
 
 `sync` needs `huggingface_hub` and a read token (HF_TOKEN or `hf auth login`).
@@ -50,6 +51,9 @@ def cmd_sync(args: argparse.Namespace) -> None:
 # reading trace files
 # --------------------------------------------------------------------------
 
+EXPORT_FORMAT = "openrouter-chat"  # the chat app's Export file
+
+
 def iter_trace_files(data_dir: Path):
     raw = data_dir / "raw"
     root = raw if raw.exists() else data_dir
@@ -59,12 +63,18 @@ def iter_trace_files(data_dir: Path):
         yield p
 
 
-def load_traces(path: Path) -> list[dict]:
-    """A file holds {"trace": {...}} per the docs; tolerate lists/bare traces."""
+def read_json(path: Path):
     try:
-        doc = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
         print(f"skip {path}: {e}", file=sys.stderr)
+        return None
+
+
+def load_traces(path: Path, doc=None) -> list[dict]:
+    """A file holds {"trace": {...}} per the docs; tolerate lists/bare traces."""
+    doc = read_json(path) if doc is None else doc
+    if isinstance(doc, dict) and doc.get("format") == EXPORT_FORMAT:
         return []
     if isinstance(doc, list):
         return [t for t in doc if isinstance(t, dict)]
@@ -286,8 +296,29 @@ class Threader:
         return len(self.threads) - 1
 
     def _turn(self, m: dict) -> dict:
-        t = {"role": m["role"], "variants": [m], "chosen": 0}
-        return t
+        return {"role": m["role"], "variants": [m], "chosen": 0}
+
+    def seed(self, chat: dict) -> None:
+        """Start from a chat the app exported, so traces can continue it."""
+        turns = [self._turn(m) for m in chat["messages"]]
+        ti = self._new_thread("", turns)
+        self.threads[ti].update(title=chat.get("title"), chat_id=chat.get("id"),
+                                created=chat.get("created"), last=chat.get("updated"))
+        self._index_tail(ti, 0)
+
+    def _add_variant(self, ti: int, i: int, reply: dict, key: str) -> None:
+        turn = self.threads[ti]["turns"][i]
+        h = mhash(reply)
+        for v in turn["variants"]:
+            if mhash(v) == h:  # the same reply seen twice (export + trace)
+                for k in ("ts", "gen", "usage", "reasoning", "model"):
+                    if reply.get(k) and not v.get(k):
+                        v[k] = reply[k]
+                break
+        else:
+            turn["variants"].append(reply)
+            self.by_reply[h] = (ti, i, len(turn["variants"]) - 1)
+        self.by_input[key] = (ti, i)
 
     def _index_tail(self, ti: int, start: int) -> None:
         for i, turn in enumerate(self.threads[ti]["turns"][start:], start):
@@ -304,10 +335,7 @@ class Threader:
         # 1. same input as before -> regeneration of that turn
         key = ihash(msgs)
         if key in self.by_input:
-            ti, i = self.by_input[key]
-            turn = self.threads[ti]["turns"][i]
-            turn["variants"].append(reply)
-            self.by_reply[mhash(reply)] = (ti, i, len(turn["variants"]) - 1)
+            self._add_variant(*self.by_input[key], reply, key)
             return
 
         # 2. continues an assistant reply we already have
@@ -328,10 +356,7 @@ class Threader:
             if (nxt < len(th["turns"]) and th["turns"][nxt]["role"] == "assistant"
                     and [mhash(t["variants"][t["chosen"]]) for t in after]
                     == [mhash(m) for m in new_msgs]):
-                turn = th["turns"][nxt]
-                turn["variants"].append(reply)
-                self.by_reply[mhash(reply)] = (ti, nxt, len(turn["variants"]) - 1)
-                self.by_input[key] = (ti, nxt)
+                self._add_variant(ti, nxt, reply, key)
                 return
             if i != len(th["turns"]) - 1:  # branching off an earlier turn
                 prefix = copy.deepcopy(th["turns"][: i + 1])
@@ -354,9 +379,11 @@ class Threader:
 def summarise(th: dict, idx: int) -> dict:
     turns = th["turns"]
     first_user = next((t["variants"][0]["content"] for t in turns if t["role"] == "user"), "")
-    title = norm(first_user)[:80] or norm(th["system"])[:80] or f"thread {idx + 1}"
+    title = (th.get("title") or norm(first_user)[:80] or norm(th["system"])[:80]
+             or f"thread {idx + 1}")
     times = [v.get("ts") for t in turns for v in t["variants"] if v.get("ts")]
-    replies = [v for t in turns for v in t["variants"] if v.get("gen")]
+    times += [iso(th[k]) for k in ("created", "last") if th.get(k)]
+    replies = [v for t in turns for v in t["variants"] if v.get("gen") or v.get("usage")]
     models = Counter(v.get("model") for v in replies if v.get("model"))
     tok = sum((v["usage"].get("total") or 0) for v in replies)
     cost = sum((v["usage"].get("cost") or 0) for v in replies)
@@ -390,34 +417,120 @@ def to_markdown(t: dict) -> str:
     return "\n".join(lines)
 
 
-def cmd_build(args: argparse.Namespace) -> None:
-    data, out = Path(args.data), Path(args.out)
-    gens = [g for f in iter_trace_files(data) for t in load_traces(f) for g in generations(t)]
-    if not gens:
-        sys.exit(f"no generations found under {data} (run sync, then inspect)")
-    gens.sort(key=lambda g: str(g["ts"]))
+def iso(v) -> str:
+    """Epoch milliseconds (the app's dates) or a string -> ISO 8601."""
+    if isinstance(v, (int, float)):
+        from datetime import datetime, timezone
+        return datetime.fromtimestamp(v / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(v or "")
+
+
+def export_chats(doc: dict) -> list[dict]:
+    """Chats from the app's Export file, as {id, title, ..., messages}."""
+    chats = []
+    for c in doc.get("chats") or []:
+        msgs = []
+        for m in c.get("messages") or []:
+            if m.get("role") not in ("user", "assistant") or not isinstance(m.get("content"), str):
+                continue
+            msg = {"role": m["role"], "content": m["content"]}
+            if m["role"] == "assistant":
+                msg.update(model=m.get("model") or "", provider=m.get("provider"),
+                           usage=usage_of({"usage": m.get("usage") or {}}))
+            msgs.append(msg)
+        if msgs:
+            chats.append({**{k: c.get(k) for k in ("id", "title", "created", "updated")},
+                          "messages": msgs, "_exported": doc.get("exportedAt", "")})
+    return chats
+
+
+def load_dir(data_dir: Path, cache: dict | None = None):
+    """Parse every file under data_dir into (generations, exported chats).
+
+    `cache` maps path -> (mtime, size, gens, chats) so a long-running server
+    only re-reads files that changed."""
+    gens, chats = [], []
+    for f in iter_trace_files(data_dir):
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        hit = cache.get(str(f)) if cache is not None else None
+        if hit and hit[:2] == (st.st_mtime, st.st_size):
+            g, c = hit[2], hit[3]
+        else:
+            doc = read_json(f)
+            if isinstance(doc, dict) and doc.get("format") == EXPORT_FORMAT:
+                g, c = [], export_chats(doc)
+            else:
+                g, c = [x for t in load_traces(f, doc) for x in generations(t)], []
+            if cache is not None:
+                cache[str(f)] = (st.st_mtime, st.st_size, g, c)
+        gens += g
+        chats += c
+    return gens, chats
+
+
+def build_payload(gens: list[dict], chats: list[dict]) -> dict:
+    # Several exports hold the same chat: keep its longest, newest copy.
+    best: dict = {}
+    for c in chats:
+        k = c.get("id") or id(c)
+        if k not in best or (len(c["messages"]), c["_exported"]) > (
+                len(best[k]["messages"]), best[k]["_exported"]):
+            best[k] = c
     th = Threader()
-    for g in gens:
+    for c in sorted(best.values(), key=lambda c: c.get("created") or 0):
+        th.seed(copy.deepcopy(c))
+    for g in sorted(gens, key=lambda g: str(g["ts"])):
         th.add(g)
     threads = [summarise(t, i) for i, t in enumerate(th.threads)]
     for t in threads:
         if t["forked_from"]:
             t["forked_from"]["thread"] = threads[t["forked_from"]["thread"]]["id"]
     threads.sort(key=lambda t: t["updated"], reverse=True)
+    return {"generations": len(gens), "imported": len(best), "threads": threads}
 
+
+def render_html(payload: dict) -> str:
+    return TEMPLATE.read_text("utf-8").replace(
+        DATA_PLACEHOLDER, json.dumps(payload, ensure_ascii=False).replace("</", "<\\/"))
+
+
+def cmd_build(args: argparse.Namespace) -> None:
+    data, out = Path(args.data), Path(args.out)
+    gens, chats = load_dir(data)
+    if not gens and not chats:
+        sys.exit(f"nothing found under {data} (run sync or import first)")
+    payload = build_payload(gens, chats)
+    threads = payload["threads"]
     out.mkdir(parents=True, exist_ok=True)
-    payload = {"generations": len(gens), "threads": threads}
     (out / "conversations.json").write_text(json.dumps(payload, ensure_ascii=False), "utf-8")
     md_dir = out / "markdown"
     md_dir.mkdir(exist_ok=True)
     for t in threads:
         (md_dir / f"{t['id']}.md").write_text(to_markdown(t), "utf-8")
-    html = TEMPLATE.read_text("utf-8").replace(
-        DATA_PLACEHOLDER,
-        json.dumps(payload, ensure_ascii=False).replace("</", "<\\/"))
-    (out / "viewer.html").write_text(html, "utf-8")
-    print(f"{len(gens)} generations -> {len(threads)} threads")
+    (out / "viewer.html").write_text(render_html(payload), "utf-8")
+    print(f"{len(gens)} generations + {payload['imported']} imported chats "
+          f"-> {len(threads)} threads")
     print(f"open {out / 'viewer.html'}")
+
+
+def cmd_import(args: argparse.Namespace) -> None:
+    """Add an Export file from the chat app (old history from before Broadcast)."""
+    src = Path(args.file)
+    doc = read_json(src)
+    if not isinstance(doc, dict) or doc.get("format") != EXPORT_FORMAT:
+        sys.exit(f"{src} is not an OpenRouter Chat export file")
+    name = f"imports/{src.name}"
+    dest = Path(args.data) / "raw" / name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(src.read_bytes())
+    print(f"{len(export_chats(doc))} chats -> {dest}")
+    if args.bucket:
+        from huggingface_hub import batch_bucket_files
+        batch_bucket_files(args.bucket, add=[(str(src), name)])
+        print(f"uploaded to hf://buckets/{args.bucket}/{name}")
 
 
 def main(argv=None) -> None:
@@ -432,8 +545,13 @@ def main(argv=None) -> None:
     b = sub.add_parser("build", help="rebuild conversations and the viewer")
     b.add_argument("--data", default="data")
     b.add_argument("--out", default="out")
+    m = sub.add_parser("import", help="add the chat app's Export file (old history)")
+    m.add_argument("file")
+    m.add_argument("--data", default="data")
+    m.add_argument("--bucket", default="", help="also upload to OWNER/NAME")
     args = ap.parse_args(argv)
-    {"sync": cmd_sync, "inspect": cmd_inspect, "build": cmd_build}[args.cmd](args)
+    {"sync": cmd_sync, "inspect": cmd_inspect, "build": cmd_build,
+     "import": cmd_import}[args.cmd](args)
 
 
 if __name__ == "__main__":
