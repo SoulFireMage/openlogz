@@ -53,7 +53,7 @@ main { overflow: auto; min-height: 0; }
   border-radius: 8px; padding: 5px 10px; cursor: pointer; }
 .btn:hover { border-color: var(--accent); }
 .menu { display: none; }
-.turns { max-width: 760px; margin: 0 auto; padding: 16px 16px 120px; }
+.turns { max-width: var(--chat-width, 760px); margin: 0 auto; padding: 16px 16px 120px; }
 .sys { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
   border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; margin-bottom: 16px; }
 .sys pre, details pre { white-space: pre-wrap; font: 13px/1.5 ui-monospace, monospace; }
@@ -76,7 +76,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; }
   border-radius: 6px; padding: 0 6px; cursor: pointer; }
 details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var(--muted);
   margin-bottom: 8px; }
-.book { max-width: 36em; margin: 0 auto; padding: 24px 20px 160px;
+.book { max-width: var(--book-width, 36em); margin: 0 auto; padding: 24px 20px 160px;
   font-size: var(--book-size, 19px); line-height: 1.75; }
 .book h2 { font: 600 13px system-ui, sans-serif; letter-spacing: .12em; text-transform: uppercase;
   color: var(--muted); text-align: center; margin: 56px 0 28px; }
@@ -89,6 +89,9 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
 .book .turn.user .who { font: 600 11px system-ui, sans-serif; letter-spacing: .1em;
   text-transform: uppercase; color: var(--accent); display: block; margin-bottom: 2px; }
 .book .swipe { font: 12px system-ui, sans-serif; color: var(--muted); }
+.width { display: inline-flex; align-items: center; gap: 4px; color: var(--muted);
+  font: 13px system-ui, sans-serif; }
+.width input { width: 110px; accent-color: var(--accent); }
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .seg button { border: 0; background: var(--panel); color: var(--ink); padding: 5px 10px; cursor: pointer; }
 .seg button.on { background: var(--accent); color: #fff; }
@@ -101,7 +104,7 @@ details.reason { font-family: system-ui, sans-serif; font-size: 13px; color: var
   aside { position: fixed; inset: 0; z-index: 5; display: none; }
   aside.open { display: flex; }
   .menu { display: inline-block; }
-  .thread-head .info, .thread-head .wide { display: none; }
+  .thread-head .info, .thread-head .wide, .thread-head .width { display: none; }
   .turns { padding: 12px 16px 100px; }
 }
 </style>
@@ -140,6 +143,18 @@ const store = {
 };
 let mode = store.get("mode", "book"), bookSize = store.get("size", 19);
 document.documentElement.style.setProperty("--book-size", bookSize + "px");
+
+// Text width, like a Kindle's margins: the slider runs from a narrow
+// column (20em) up to the whole screen, on a log scale so the useful
+// reading widths get most of its travel. Each view remembers its own.
+const WIDTH_DEFAULT = { book: 33, chat: 48 };  // 36em and ~760px
+const widthCss = v => v >= 100 ? "100%" : (20 * Math.pow(6, v / 100)).toFixed(1) + "em";
+const widthOf = m => store.get("width-" + m, WIDTH_DEFAULT[m]);
+function applyWidth(m, v) {
+  document.documentElement.style.setProperty("--" + m + "-width", widthCss(v));
+}
+applyWidth("book", widthOf("book"));
+applyWidth("chat", widthOf("chat"));
 
 try { const t = localStorage.getItem("olz-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
 $("#theme").onclick = () => {
@@ -206,6 +221,7 @@ function openThread(id, turn, variant) {
       <span class="info">${th.models.map(esc).join(", ")} · ${fmtNum(th.tokens)} tok${th.cost ? " · $" + th.cost.toFixed(2) : ""}${fork}</span>
       <span class="seg"><button data-mode="book" class="${mode === "book" ? "on" : ""}">Book</button><button data-mode="chat" class="${mode === "chat" ? "on" : ""}">Chat</button></span>
       ${mode === "book" ? `<button class="btn" data-size="-1">A−</button><button class="btn" data-size="1">A+</button>` : ""}
+      <label class="width" title="Text width">↔<input type="range" id="width" min="0" max="100" value="${widthOf(mode)}" aria-label="Text width"></label>
       <button class="btn wide" id="top">Start</button>
       <button class="btn" id="end">Latest</button>
       <button class="btn" id="md">Export .md</button>
@@ -218,6 +234,7 @@ function openThread(id, turn, variant) {
   $("#top").onclick = () => $("#main").scrollTo({ top: 0 });
   $("#end").onclick = () => $("#main").scrollTo({ top: $("#main").scrollHeight });
   $("#md").onclick = () => exportMd(th);
+  $("#width").oninput = e => { applyWidth(mode, +e.target.value); store.set("width-" + mode, +e.target.value); };
   $("#side").classList.remove("open");
   listThreads();
   const resumed = turn === undefined;
